@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kindle 时钟</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background: #ffffff;
+    color: #000000;
+    font-family: Georgia, 'Times New Roman', serif;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  #stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* 垂直居中：table 布局，兼容旧版 WebKit（旧 Kindle 浏览器无 flexbox） */
+  #table { display: table; width: 100%; height: 100%; }
+  #cell  { display: table-cell; vertical-align: middle; text-align: center; }
+
+  /* 日期 */
+  .date {
+    font-weight: normal;
+    letter-spacing: 0.15em;
+  }
+
+  /* 时间 */
+  .time {
+    line-height: 1;
+    font-weight: bold;
+    letter-spacing: 0.01em;
+  }
+
+  .time .ampm {
+    font-size: 0.27em;
+    font-weight: normal;
+    margin-left: 0.2em;
+    vertical-align: super;
+  }
+
+  /* 星期 */
+  .weekday {
+    letter-spacing: 0.5em;
+    text-indent: 0.5em; /* 抵消最后一个字的间距，视觉居中 */
+  }
+
+  /* 秒（可点击切换显示） */
+  .seconds {
+    color: #444444;
+  }
+
+  /* 天气 */
+  .weather {
+    letter-spacing: 0.1em;
+  }
+
+  .hidden { display: none; }
+
+  .hint {
+    position: absolute;
+    bottom: 2.5%;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #999999;
+    font-family: sans-serif;
+  }
+
+  /* 旋转按钮 */
+  #rotateBtn {
+    position: absolute;
+    top: 2%;
+    right: 3%;
+    background: #ffffff;
+    border: 1px solid #bbbbbb;
+    color: #666666;
+    font-family: sans-serif;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="table">
+    <div id="cell">
+      <div class="date" id="date"></div>
+      <div class="time" id="time"></div>
+      <div class="weekday" id="weekday"></div>
+      <div class="weather hidden" id="weather"></div>
+      <div class="seconds hidden" id="seconds"></div>
+    </div>
+  </div>
+  <div class="hint" id="hint">点击屏幕切换秒数 / 12小时制 · 右上角「旋转」横屏</div>
+  <button id="rotateBtn" type="button">旋转</button>
+</div>
+
+<script>
+(function () {
+  var showSeconds = false;
+  var is24h = true;
+
+  var elStage = document.getElementById('stage');
+  var elDate = document.getElementById('date');
+  var elTime = document.getElementById('time');
+  var elWeekday = document.getElementById('weekday');
+  var elSeconds = document.getElementById('seconds');
+  var elHint = document.getElementById('hint');
+  var elWeather = document.getElementById('weather');
+  var rotateBtn = document.getElementById('rotateBtn');
+
+  var WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  /* ===== URL 参数 ===== */
+  var query = {};
+  try {
+    location.search.replace(/[?&]([^=&]+)=([^&]*)/g, function (all, k, v) {
+      query[decodeURIComponent(k)] = decodeURIComponent(v);
+      return all;
+    });
+  } catch (e) {}
+
+  /* ===== 时间：固定按目标时区显示（默认香港 UTC+8，可用 ?tz=9 覆盖），
+     并通过网络校时修正，不依赖 Kindle 本地时钟/时区设置 ===== */
+  var TZ = (query.tz !== undefined && !isNaN(parseFloat(query.tz))) ? parseFloat(query.tz) : 8;
+  var timeCorrection = 0; // 毫秒，网络校时得到的修正量
+  var timeSynced = false;
+
+  function hkNow() {
+    return new Date(Date.now() + timeCorrection + TZ * 3600000);
+  }
+
+  /* ===== 旋转与字号（全部用 px 计算，不依赖 vw/vh/flex，兼容旧 Kindle 浏览器） ===== */
+
+  // 旋转状态：0 = 竖屏 / 90 = 横屏(顺) / 270 = 横屏(逆)
+  var rotation = 0;
+  try {
+    var saved = window.localStorage.getItem('clockRotation');
+    if (saved === '90' || saved === '270') rotation = parseInt(saved, 10);
+  } catch (e) {}
+
+  function setTransform(el, val, origin) {
+    el.style.transform = val;
+    el.style.webkitTransform = val; // 旧 WebKit 前缀
+    el.style.transformOrigin = origin;
+    el.style.webkitTransformOrigin = origin;
+  }
+
+  function applyLayout() {
+    var w = window.innerWidth || 600;
+    var h = window.innerHeight || 800;
+    var s = elStage.style;
+
+    if (rotation === 90) {
+      s.position = 'absolute';
+      s.top = '0';
+      s.left = w + 'px';
+      s.width = h + 'px';
+      s.height = w + 'px';
+      setTransform(elStage, 'rotate(90deg)', 'top left');
+    } else if (rotation === 270) {
+      s.position = 'absolute';
+      s.top = h + 'px';
+      s.left = '0';
+      s.width = h + 'px';
+      s.height = w + 'px';
+      setTransform(elStage, 'rotate(-90deg)', 'top left');
+    } else {
+      s.position = 'relative';
+      s.top = '';
+      s.left = '';
+      s.width = '100%';
+      s.height = '100%';
+      setTransform(elStage, '', '');
+    }
+
+    // u = 有效宽度的 1%，所有尺寸按 u 布局，旋转后字体依旧铺满
+    var u = (rotation === 0 ? w : h) / 100;
+
+    elDate.style.fontSize = (8 * u) + 'px';
+    elDate.style.marginBottom = (3 * u) + 'px';
+    elTime.style.fontSize = (30 * u) + 'px';
+    elWeekday.style.fontSize = (7 * u) + 'px';
+    elWeekday.style.marginTop = (3 * u) + 'px';
+    elWeather.style.fontSize = (6.5 * u) + 'px';
+    elWeather.style.marginTop = (3 * u) + 'px';
+    elSeconds.style.fontSize = (6 * u) + 'px';
+    elSeconds.style.marginTop = (2 * u) + 'px';
+    elHint.style.fontSize = (3.2 * u) + 'px';
+    elHint.style.bottom = (2.5 * u) + 'px';
+    rotateBtn.style.fontSize = (3.2 * u) + 'px';
+    rotateBtn.style.top = (2 * u) + 'px';
+    rotateBtn.style.right = (3 * u) + 'px';
+    rotateBtn.style.padding = (0.8 * u) + 'px ' + (1.5 * u) + 'px';
+  }
+
+  // 点击旋转：0 -> 90 -> 270 -> 0 循环
+  rotateBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    rotation = rotation === 0 ? 90 : (rotation === 90 ? 270 : 0);
+    try { window.localStorage.setItem('clockRotation', String(rotation)); } catch (e2) {}
+    applyLayout();
+  });
+
+  window.addEventListener('resize', applyLayout);
+
+  /* ===== 时钟 ===== */
+
+  // 让墨水屏尽量少刷新：分钟变化时才重绘大数字
+  var lastMinute = -1;
+  var lastSecond = -1;
+  var lastDay = -1;
+
+  function render(force) {
+    var now = hkNow();
+    var h = now.getUTCHours();
+    var m = now.getUTCMinutes();
+    var s = now.getUTCSeconds();
+    var ampm = '';
+
+    if (!is24h) {
+      ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12;
+      if (h === 0) h = 12;
+    }
+
+    var hh12 = is24h ? pad(h) : h;
+
+    // 日期与星期：一天只更新一次
+    if (now.getUTCDate() !== lastDay) {
+      lastDay = now.getUTCDate();
+      elDate.textContent = now.getUTCFullYear() + ' 年 ' +
+        (now.getUTCMonth() + 1) + ' 月 ' + now.getUTCDate() + ' 日';
+      elWeekday.textContent = WEEKDAYS[now.getUTCDay()];
+    }
+
+    // 时间：分钟变化时更新
+    var minuteKey = h * 60 + m;
+    if (minuteKey !== lastMinute) {
+      lastMinute = minuteKey;
+      var html = hh12 + '<span style="opacity:.35">:</span>' + pad(m);
+      if (ampm) html += '<span class="ampm">' + ampm + '</span>';
+      elTime.innerHTML = html;
+    }
+
+    // 秒数：仅在开启时每秒更新
+    if (showSeconds) {
+      if (s !== lastSecond) {
+        lastSecond = s;
+        elSeconds.textContent = pad(s);
+      }
+    }
+  }
+
+  applyLayout();
+  render(true);
+
+  // 主循环：每秒检查一次，但只在内容变化时才改 DOM（减少墨水屏闪烁）
+  setInterval(function () { render(false); }, 1000);
+
+  // 点击切换设置：秒数显示 -> 12/24 小时制
+  var mode = 0;
+  document.addEventListener('click', function () {
+    mode = (mode + 1) % 3;
+    if (mode === 0) {
+      showSeconds = false; is24h = true;
+      elSeconds.classList.add('hidden');
+      elHint.textContent = '点击屏幕切换秒数 / 12小时制 · 右上角「旋转」横屏';
+    } else if (mode === 1) {
+      showSeconds = true; is24h = true;
+      elSeconds.classList.remove('hidden');
+      elHint.textContent = '当前：显示秒数（会增加刷新）';
+    } else {
+      showSeconds = false; is24h = false;
+      elSeconds.classList.add('hidden');
+      elHint.textContent = '当前：12 小时制';
+    }
+    lastMinute = -1;
+    render(true);
+  });
+
+  /* ===== 防残影：常亮显示下墨水屏会留残影，每小时整点黑白闪一次强制全屏重绘 ===== */
+  var lastFlashHour = -1;
+  setInterval(function () {
+    var now = hkNow();
+    if (now.getUTCMinutes() === 0 && now.getUTCHours() !== lastFlashHour) {
+      lastFlashHour = now.getUTCHours();
+      document.body.style.backgroundColor = '#000000';
+      setTimeout(function () {
+        document.body.style.backgroundColor = '#ffffff';
+      }, 200);
+    }
+  }, 1000);
+
+  /* ===== 天气（Open-Meteo，免费无需 API key） ===== */
+
+  // 默认香港；可通过 URL 参数自定义位置：clock.html?lat=31.23&lon=121.47&city=上海
+  var LAT = query.lat || '22.3193';
+  var LON = query.lon || '114.1694';
+  var CITY = query.city || '';
+
+  // WMO 天气代码 -> 中文描述
+  var WMO = {
+    0: '晴', 1: '晴间多云', 2: '多云', 3: '阴',
+    45: '雾', 48: '雾凇',
+    51: '毛毛雨', 53: '毛毛雨', 55: '毛毛雨',
+    61: '小雨', 63: '中雨', 65: '大雨',
+    66: '冻雨', 67: '冻雨',
+    71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒',
+    80: '阵雨', 81: '阵雨', 82: '强阵雨',
+    85: '阵雪', 86: '阵雪',
+    95: '雷阵雨', 96: '雷阵雨伴冰雹', 99: '雷阵雨伴冰雹'
+  };
+
+  var weatherShown = false;
+  var lastWeatherText = '';
+
+  function fetchWeather() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'https://api.open-meteo.com/v1/forecast?latitude=' + LAT +
+      '&longitude=' + LON + '&current_weather=true&timezone=auto', true);
+    xhr.onload = function () {
+      if (xhr.status !== 200) return;
+      try {
+        var root = JSON.parse(xhr.responseText);
+        var d = root.current_weather;
+        // 若精确校时未成功，用天气返回的当地时间（分钟精度）兜底校时
+        if (!timeSynced) {
+          var tm = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(d.time || '');
+          var off = (typeof root.utc_offset_seconds === 'number')
+            ? root.utc_offset_seconds * 1000 : 8 * 3600000;
+          if (tm) {
+            timeCorrection = Date.UTC(+tm[1], +tm[2] - 1, +tm[3], +tm[4], +tm[5]) -
+              off - Date.now();
+            lastMinute = -1;
+          }
+        }
+        var text = (CITY ? CITY + ' · ' : '') +
+          (WMO[d.weathercode] || '—') + ' · ' + Math.round(d.temperature) + '°C';
+        // 内容不变就不改 DOM，避免墨水屏无谓刷新
+        if (text !== lastWeatherText) {
+          lastWeatherText = text;
+          elWeather.textContent = text;
+          elWeather.classList.remove('hidden');
+        }
+        weatherShown = true;
+      } catch (e) {}
+    };
+    // 离线/失败时保持隐藏，等下次定时重试
+    xhr.send();
+  }
+
+  fetchWeather();
+  // 每 12 小时刷新一次；若一直没成功（如 Wi-Fi 未就绪），每 5 分钟重试
+  setInterval(fetchWeather, 12 * 60 * 60 * 1000);
+  setInterval(function () {
+    if (!weatherShown) fetchWeather();
+  }, 5 * 60 * 1000);
+
+  /* ===== 网络校时（timeapi.io，精确到秒，每小时一次） ===== */
+  function syncTime() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'https://timeapi.io/api/Time/current/zone?timeZone=Asia%2FHong_Kong', true);
+    xhr.onload = function () {
+      if (xhr.status !== 200) return;
+      try {
+        var d = JSON.parse(xhr.responseText);
+        // 返回的是香港墙钟时间（UTC+8，无夏令时），换算成真实 UTC 纪元后求修正量
+        var apiEpoch = Date.UTC(d.year, d.month - 1, d.day, d.hour, d.minute, d.seconds) - 8 * 3600000;
+        timeCorrection = apiEpoch - Date.now();
+        timeSynced = true;
+        lastMinute = -1;
+        render(true);
+      } catch (e) {}
+    };
+    xhr.send();
+  }
+
+  syncTime();
+  setInterval(syncTime, 60 * 60 * 1000);
+})();
+</script>
+</body>
+</html>
