@@ -2,6 +2,11 @@
 # Name: 大字时钟 Big Clock
 # Author: hahakalo
 #
+# v8：电源键监视改为自动识别设备（不再猜 gpio-keys——Basic 3 的电源键
+#     挂在别的名字的设备上，导致 v7 双击无反应）。按名称匹配 key/pwr/power
+#     的输入设备并行监视；启动时把 /proc/bus/input/devices 写入日志备查。
+#     其余同 v7：首绘后立即冻结；整点 60 秒维护窗口；电源键双击退出。
+#
 # v7：撤销 v5 的「开机 120 秒不冻结宽限」——该宽限期让 scriptlet 退出清理
 #     有机可乘（正是 v3 之前闪退的元凶），恢复 v3 实证的首绘后立即冻结。
 #     维护窗口仅保留每小时整点 60 秒；退出靠电源键双击 / STOP 文件。
@@ -201,14 +206,12 @@ unfreeze() {
   }
 }
 
-# ---------- 电源键双击退出（冻结模式下屏幕触摸不可用，用物理按键） ----------
+# ---------- 电源键双击退出（v8：自动识别按键设备，多设备并行监视） ----------
 # 直接读内核输入事件：EV_KEY(1) KEY_POWER(116) VALUE=1(按下)
 # 3 秒内两次按下 -> 写 STOP 文件，主循环 20 秒内执行停表
-power_watch() {
-  D=$(grep -A4 'gpio-keys' /proc/bus/input/devices 2>/dev/null | grep -o 'event[0-9][0-9]*' | head -n 1)
-  PD=/dev/input/${D:-event0}
-  [ -c "$PD" ] || { echo "watch: no power dev" >> "$LOG"; return; }
-  echo "watch: $PD" >> "$LOG"
+watch_one() {
+  PD="$1"
+  [ -c "$PD" ] || return
   if command -v timeout >/dev/null 2>&1; then TMO="timeout 3500"; else TMO=""; fi
   LASTP=0
   while [ ! -f /tmp/clock-quit ]; do
@@ -223,15 +226,45 @@ power_watch() {
     [ -n "$TY" ] || continue
     if [ "$TY" = "1" ] && [ "$CO" = "116" ] && [ "$VA" = "1" ]; then
       NOW=$(date +%s)
-      echo "power press $NOW" >> "$LOG"
+      echo "power press @ $PD" >> "$LOG"
       if [ "$LASTP" != "0" ] && [ $((NOW - LASTP)) -le 3 ]; then
         echo "POWER DOUBLE-PRESS -> exit" >> "$LOG"
-        touch "$DOC/STOP"
+        touch "$DOC/STOP" 2>/dev/null
         return
       fi
       LASTP=$NOW
     fi
   done
+}
+
+power_watch() {
+  echo "--- input devices ---" >> "$LOG"
+  cat /proc/bus/input/devices >> "$LOG" 2>/dev/null
+  sed -n 's/^N: Name=//p' /proc/bus/input/devices > /tmp/.in 2>/dev/null
+  sed -n 's/^H: Handlers=//p' /proc/bus/input/devices > /tmp/.ih 2>/dev/null
+  rm -f /tmp/.wl
+  if [ -s /tmp/.in ] && [ -s /tmp/.ih ]; then
+    while read -r NM <&3; do
+      read -r HD <&4 || break
+      case "$NM" in
+        *key*|*Key*|*pwr*|*Pwr*|*power*|*Power*)
+          for h in $HD; do
+            case "$h" in
+              event*) echo "/dev/input/$h" >> /tmp/.wl ;;
+            esac
+          done ;;
+      esac
+    done 3</tmp/.in 4</tmp/.ih
+  fi
+  if [ -s /tmp/.wl ]; then
+    echo "watchers: $(tr '\n' ' ' < /tmp/.wl)" >> "$LOG"
+    while read -r PD; do watch_one "$PD" & done < /tmp/.wl
+  else
+    echo "watchers: ALL (fallback)" >> "$LOG"
+    for PD in /dev/input/event*; do
+      [ -c "$PD" ] && watch_one "$PD" &
+    done
+  fi
 }
 
 stop_clock() {
