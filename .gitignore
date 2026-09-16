@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# 生成的时钟图片（约 34MB，用 mkpics.py 重新生成）
+clockimg/
+
+# 字体文件（版权原因不入库，见 README 安装步骤）
+clock-setup/Arial-Bold.ttf
+clock-setup/*.ttf
