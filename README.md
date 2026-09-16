@@ -136,6 +136,7 @@ clock.sh                                 →  Kindle /documents/clock.sh
 10. **墨水屏残影**：常亮显示数小时后会有淡残影，时钟每分钟用 GC16 波形整屏刷新，基本可控；长期使用如出现顽固残影，重启一次即可深度清屏。
 11. **冻结 UI 与 USB 维护的死锁**：冻结 cvm/awesome 后屏幕确实稳了，但设备端文件缓存导致「USB 写入的 STOP 停表文件」运行中的脚本看不见（Mac 能写进去、设备读不到），且退出机制全部依赖 USB——形成死锁。曾导致设备锁死在时钟界面，只能强启。解法（v5/v6）：脚本自拷贝到 `/tmp` 内存运行（不占用户分区）+ 定时维护窗口（重启后 2 分钟、每小时整点 1 分钟解冻）+ **电源键双击退出**（后台直接读内核输入事件 `/dev/input/eventX`，不依赖屏幕触摸与 USB，冻结状态下照常工作）。
 12. **shell 解析 `od -d` 输出的坑**：不同 od 实现输出字段数不同（8/9/10 个：有无偏移列、有无尾偏移列），按固定下标解析会漏判。解法：按 `case $#` 分支处理；另外 zsh 测试脚本时变量不做词分割，`set -- $E` 结果与设备上的 sh 不同，测试必须用 `sh -c`。
+13. **电源键不在 gpio-keys 设备上**：Basic 3 的电源键挂在名为 `bd71827-power` 的输入设备（event1），而非老机型教程默认的 `gpio-keys`（event0）——照搬硬编码监视 gpio-keys 会导致双击退出毫无反应，且无任何报错。v8 改为启动时扫描 `/proc/bus/input/devices`，凡名称含 key/pwr/power 的输入设备全部并行监视；无匹配时退化为监视全部 event 设备。
 
 ## 替代方案：网页版（免越狱）
 
@@ -274,6 +275,7 @@ Open the Kindle library and tap the new entry **"Big Clock"** (KPV scriptlet). T
 10. **E-ink ghosting**: mostly handled by GC16 full refreshes each minute; a reboot deep-cleans stubborn ghosts.
 11. **Freeze vs. USB maintenance deadlock**: freezing cvm/awesome stabilized the screen, but device-side file caching made USB-written STOP files invisible to the running script (the Mac could write them, the device couldn't see them), while every exit mechanism depended on USB — a deadlock that once locked the device on the clock screen. Fixes (v5/v6): run the script from a `/tmp` self-copy (user partition stays unmounted), scheduled maintenance windows (2 min after boot, 1 min each full hour), and the **power-button double-press exit** (reads kernel input events from `/dev/input/eventX` directly — works while frozen, no touch or USB needed).
 12. **Parsing `od -d` in shell**: different od builds emit 8/9/10 fields (leading offset, trailing offset), so fixed-index parsing silently fails. Fix: branch on `case $#`; also, zsh doesn't word-split variables, so `set -- $E` behaves differently than on-device sh — always test parsers with `sh -c`.
+13. **The power button is not on gpio-keys**: on Basic 3 it lives on an input device named `bd71827-power` (event1), not the `gpio-keys` (event0) older guides assume — a hardcoded gpio-keys watcher makes the double-press exit silently dead. v8 auto-scans `/proc/bus/input/devices` at startup and watches every device whose name contains key/pwr/power in parallel, falling back to all event devices if nothing matches.
 
 ## Alternative: web version (no jailbreak)
 
