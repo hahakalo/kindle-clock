@@ -118,7 +118,29 @@ clock.sh                                 →  Kindle /documents/clock.sh
 
 **耗电与发热**：常亮 + 每分钟刷新 + Wi-Fi 常开的功耗高于正常待机，请保持插电使用。
 
-**修改天气城市**：编辑 `clock.sh` 中 `weather()` 函数里的经纬度（默认香港 22.3193, 114.1694），改成你的城市坐标即可（Open-Meteo 官网可查）。
+**修改天气城市**：见下方「自定义配置」。
+
+## 自定义配置
+
+一句话原则：**"长什么样"在预渲染图片里（改 mkpics.py，需重新生成图片）；"多久一次/在哪里"在设备脚本里（改 clock.sh，换文件即生效）**。
+
+| 想改什么 | 改哪里 | 默认值 | 生效方式 |
+|---|---|---|---|
+| 天气更新频率 | `clock.sh` 主循环里的 `1800`（单位：秒） | 30 分钟 | 重新拷 clock.sh 到 documents/，书库点一下「大字时钟」重启脚本即可，无需动图片 |
+| 天气城市 | `clock.sh` `weather()` 里的 `latitude=22.3193&longitude=114.1694` | 香港 | 同上（坐标可在 Open-Meteo 官网查询） |
+| 字体大小/布局/日期格式 | `mkpics.py`（时间 192/252px、日期 72px、星期 58px、温度 96px，各段均有注释） | 见脚本 | 电脑上 `python3 mkpics.py` 重新生成，再把 clockimg/ 拷回 Kindle（约 95MB） |
+| 天气描述用词 | `mkpics.py` 的 `DESCS` 列表 | 晴/局部多云/多云… | 重新生成图片；**必须同步**修改 `clock.sh` 里 weather_code → 序号的 `case` 映射，两边顺序一一对应 |
+
+## 换一台 Kindle 怎么迁移？
+
+整套方案只有三样东西跟具体设备绑定：**越狱方式、屏幕分辨率、fbink 路径**。其余（脚本逻辑、全套图片、电源键双击退出、横竖屏切换）直接复用。
+
+1. **查新机固件 → 选越狱方式**：到 [kindlemodding.org 越狱向导](https://kindlemodding.org/jailbreak-wizard.html) 按固件版本选择（本项目的 5.18.1.1.1 用 SpringBreak，其他固件可能是其他工具）。越狱后务必插线再跑一次工具清理填充文件，否则开机要 15 分钟以上。
+2. **核对屏幕分辨率**：与 600×800 相同 → 直接复用现有 `clockimg/`；不同（如 Paperwhite 高分屏）→ 需改 `mkpics.py`：顶部 `W, H`（竖屏）/ `LW, LH`（横屏）、banner 与 wx 的画布尺寸（`600,200` / `800,170`，共 4 处）、各字号按比例放大；同时改 `clock.sh` `draw()` 末尾 GC16 刷新区域的 `width=600,height=800`。然后重新生成图片。
+3. **拷贝文件**：USB 连新机，`clockimg/` 的 9 个子目录 → 根目录 `/clockimg/`；`clock.sh` → `/documents/`。
+4. **核对 fbink 路径**：`clock.sh` 顶部的 `FBINK=/mnt/us/libkh/bin/fbink`，新机越狱方案若把 fbink 放在别处，改这一行即可。
+5. **启动**：书库点「大字时钟」。电源键双击退出是 v8 自动扫描输入设备实现的，换机型无需改代码。
+6. **旧机退役（可选）**：在维护窗口（重启后 2 分钟内 / 每小时整点后 1 分钟内）插 USB，往 documents/ 放一个名为 `STOP` 的空文件即彻底停用；或直接删除 `/clockimg/` 与 `/documents/clock.sh`。
 
 ## 踩坑记录（血泪史，按时间顺序）
 
@@ -259,7 +281,29 @@ Open the Kindle library and tap the new entry **"Big Clock"** (KPV scriptlet). T
 
 **Power/heat**: always-on + Wi-Fi draws more than standby — keep it plugged in.
 
-**Change city**: edit the coordinates in `weather()` inside `clock.sh` (default: Hong Kong).
+**Change city**: see [Customization](#customization) below.
+
+## Customization
+
+Rule of thumb: **what it looks like lives in the pre-rendered images (edit mkpics.py, regenerate); how often / where lives in the device script (edit clock.sh, just re-copy it)**.
+
+| To change | Edit | Default | How to apply |
+|---|---|---|---|
+| Weather refresh interval | `1800` (seconds) in the main loop of `clock.sh` | 30 min | Re-copy clock.sh to documents/ and tap "Big Clock" to restart the script — no image changes needed |
+| Weather city | coordinates `latitude=22.3193&longitude=114.1694` in `weather()` | Hong Kong | Same as above (lookup coordinates on open-meteo.com) |
+| Font sizes / layout / date format | `mkpics.py` (time 192/252 px, date 72 px, weekday 58 px, temp 96 px — commented in the script) | see script | Re-run `python3 mkpics.py` on the computer, copy clockimg/ back to the Kindle (~95 MB) |
+| Weather wording | the `DESCS` list in `mkpics.py` | 晴/局部多云/… | Regenerate images; you **must also** update the weather_code → index `case` mapping in `clock.sh` — the two must stay in sync |
+
+## Migrating to Another Kindle
+
+Only three things are device-specific: **the jailbreak method, the screen resolution, and the fbink path**. Everything else (script logic, all images, power-button double-press exit, orientation switching) carries over as-is.
+
+1. **Check the new device's firmware → pick a jailbreak**: follow the [kindlemodding.org wizard](https://kindlemodding.org/jailbreak-wizard.html) (this project's 5.18.1.1.1 uses SpringBreak; other firmwares may need other tools). After jailbreaking, plug in and run the tool once more to clean filler files, or boots take 15+ minutes.
+2. **Check the screen resolution**: same 600×800 → reuse the existing `clockimg/` as-is; different (e.g. a high-res Paperwhite) → edit `mkpics.py`: `W, H` (portrait) / `LW, LH` (landscape) at the top, the banner & wx canvas sizes (`600,200` / `800,170`, 4 places), and scale up font sizes proportionally; also update the GC16 refresh region `width=600,height=800` at the end of `draw()` in `clock.sh`. Then regenerate the images.
+3. **Copy files**: `clockimg/`'s 9 subdirs → `/clockimg/` at the Kindle root; `clock.sh` → `/documents/`.
+4. **Verify the fbink path**: `FBINK=/mnt/us/libkh/bin/fbink` near the top of `clock.sh`; adjust if your jailbreak bundle puts fbink elsewhere.
+5. **Start**: tap "Big Clock" in the library. The double-press exit auto-scans input devices (v8) — no per-model tweaks needed.
+6. **Retire the old device (optional)**: during a maintenance window (within 2 min after a reboot, or within 1 min after a full hour), plug USB and drop an empty file named `STOP` into documents/; or simply delete `/clockimg/` and `/documents/clock.sh`.
 
 ## Pitfalls (in order of encounter)
 
