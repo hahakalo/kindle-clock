@@ -23,6 +23,8 @@
 - **零依赖**：不依赖浏览器、不依赖局域网服务器、不依赖任何外部主机——全部在 Kindle 本机运行
 - **开机自启**：重启后时钟自动恢复，无需任何操作
 - **横竖屏切换**：USB 放置/删除 `documents/HENG` 文件即可切换横屏（两个方向）/竖屏，拔线后 20 秒内生效，信息点完全相同
+- **电源键退出**：3 秒内快速连按两下电源键即可退出时钟回到桌面——再也不怕锁死（触摸屏在冻结模式下不可用，故用物理按键）
+- **维护窗口**：重启后 2 分钟内 + 每小时整点后 1 分钟内系统自动解冻，这些时段插 USB 维护最稳
 - **天气**：Open-Meteo 免费接口（无需 key），每 30 分钟更新；断网时时钟照常走
 
 ## 我的设备（实测通过）
@@ -108,7 +110,9 @@ clock.sh                                 →  Kindle /documents/clock.sh
 | 重启后 | 无需操作，开机自启服务自动恢复时钟 |
 | 天气 | 保持 Wi-Fi 连接，每 30 分钟自动更新（Open-Meteo，免费无 key） |
 | 横屏/竖屏 | USB 连接后改 `documents/HENG` 文件：删除 = 竖屏；内容 `1` = 横屏（充电口在右）；内容 `2` = 横屏（充电口在左）。拔线后 20 秒内自动切换，无需重启 |
-| 触摸无反应 | 正常现象——时钟模式下系统 UI 已冻结（这正是屏幕不被覆盖的原因） |
+| 退出时钟（回桌面） | **3 秒内快速连按两下电源键**。20 秒内自动解冻、停止服务、回到桌面。之后重启不会自动运行时钟；想再用：书库点「大字时钟」 |
+| USB 维护最佳时机 | 重启后 2 分钟内，或每小时整点后 1 分钟内（系统自动解冻，USB 读写最可靠）。冻结期间插 USB 虽能看到盘，但设备端缓存可能读不到新写入的文件 |
+| 触摸无反应 | 正常现象——时钟模式下系统 UI 已冻结（这正是屏幕不被覆盖的原因）。退出用电源键双击 |
 | 紧急恢复 | 长按电源键约 10 秒强制重启（硬件级，永远有效）；重启后时钟自动回来 |
 | 彻底停用 | USB 连接后在 documents 文件夹新建名为 `STOP` 的空文件，20 秒内自动解冻、清理自启、退出 |
 
@@ -130,6 +134,8 @@ clock.sh                                 →  Kindle /documents/clock.sh
 8. **图片文件名重名陷阱**：日期图用 `月日` 不补零命名时，`1月11日` 与 `11月1日` 都是 `111`，互相覆盖后一年有 18 天显示错误日期。改用补零（`0111`/`1101`）根治。
 9. **越狱后首次开机极慢属正常**：SpringBreak 填充文件未清理时，开机最长 15 分钟，**不要**误判为变砖而强制重启。
 10. **墨水屏残影**：常亮显示数小时后会有淡残影，时钟每分钟用 GC16 波形整屏刷新，基本可控；长期使用如出现顽固残影，重启一次即可深度清屏。
+11. **冻结 UI 与 USB 维护的死锁**：冻结 cvm/awesome 后屏幕确实稳了，但设备端文件缓存导致「USB 写入的 STOP 停表文件」运行中的脚本看不见（Mac 能写进去、设备读不到），且退出机制全部依赖 USB——形成死锁。曾导致设备锁死在时钟界面，只能强启。解法（v5/v6）：脚本自拷贝到 `/tmp` 内存运行（不占用户分区）+ 定时维护窗口（重启后 2 分钟、每小时整点 1 分钟解冻）+ **电源键双击退出**（后台直接读内核输入事件 `/dev/input/eventX`，不依赖屏幕触摸与 USB，冻结状态下照常工作）。
+12. **shell 解析 `od -d` 输出的坑**：不同 od 实现输出字段数不同（8/9/10 个：有无偏移列、有无尾偏移列），按固定下标解析会漏判。解法：按 `case $#` 分支处理；另外 zsh 测试脚本时变量不做词分割，`set -- $E` 结果与设备上的 sh 不同，测试必须用 `sh -c`。
 
 ## 替代方案：网页版（免越狱）
 
@@ -170,6 +176,8 @@ A jailbroken old Kindle repurposed as a dedicated e-ink clock:
 - **Zero external dependencies**: no browser, no LAN server, no host computer — everything runs on the Kindle itself
 - **Auto-start on boot**: after a reboot the clock comes back by itself
 - **Portrait/landscape switch**: create/delete the `documents/HENG` file over USB — landscape (two directions) or portrait, effective within 20 s after unplugging, identical information
+- **Power-button exit**: double-press the power button within 3 s to exit the clock and return to the home screen — no more lock-ins (touch is dead while frozen, hence a physical button)
+- **Maintenance windows**: the system auto-unfreezes for the first 2 min after boot and for 1 min at the top of every hour — plug USB during these windows for reliable maintenance
 - **Weather**: free Open-Meteo API (no key), refreshed every 30 min; offline the clock keeps ticking
 
 ## Tested Device
@@ -242,7 +250,9 @@ Open the Kindle library and tap the new entry **"Big Clock"** (KPV scriptlet). T
 | After reboot | Nothing — the boot service restores the clock |
 | Weather | Keep Wi-Fi on; refreshed every 30 min |
 | Portrait/landscape | Edit `documents/HENG` over USB: absent = portrait; content `1` = landscape (USB port on the right); `2` = landscape (USB port on the left). Takes effect within 20 s after unplugging |
-| Touch unresponsive | Expected — the UI is frozen (that's why nothing can cover the clock) |
+| Exit the clock | **Double-press the power button within 3 s.** It unfreezes, stops the service and returns to home within 20 s. The clock won't auto-start after reboots; tap "Big Clock" in the library to use it again |
+| Best time for USB maintenance | Within 2 min after a reboot, or within 1 min after any full hour (the system auto-unfreezes). Outside windows, files written over USB may be invisible to the running script due to device-side caching |
+| Touch unresponsive | Expected — the UI is frozen (that's why nothing can cover the clock). Exit with the power-button double-press |
 | Emergency escape | Hold the power button ~10 s for a hard reboot (always works); the clock returns afterwards |
 | Stop for good | Create an empty file named `STOP` in documents/ via USB; it unfreezes, removes auto-start and exits within 20 s |
 
@@ -262,6 +272,8 @@ Open the Kindle library and tap the new entry **"Big Clock"** (KPV scriptlet). T
 8. **Filename collision trap**: date images named without zero-padding collide (`1月11日` vs `11月1日`), corrupting 18 days a year. Zero-padding fixes it.
 9. **First boot after jailbreak can take up to 15 minutes** if filler files aren't cleaned — do not mistake it for a brick.
 10. **E-ink ghosting**: mostly handled by GC16 full refreshes each minute; a reboot deep-cleans stubborn ghosts.
+11. **Freeze vs. USB maintenance deadlock**: freezing cvm/awesome stabilized the screen, but device-side file caching made USB-written STOP files invisible to the running script (the Mac could write them, the device couldn't see them), while every exit mechanism depended on USB — a deadlock that once locked the device on the clock screen. Fixes (v5/v6): run the script from a `/tmp` self-copy (user partition stays unmounted), scheduled maintenance windows (2 min after boot, 1 min each full hour), and the **power-button double-press exit** (reads kernel input events from `/dev/input/eventX` directly — works while frozen, no touch or USB needed).
+12. **Parsing `od -d` in shell**: different od builds emit 8/9/10 fields (leading offset, trailing offset), so fixed-index parsing silently fails. Fix: branch on `case $#`; also, zsh doesn't word-split variables, so `set -- $E` behaves differently than on-device sh — always test parsers with `sh -c`.
 
 ## Alternative: web version (no jailbreak)
 

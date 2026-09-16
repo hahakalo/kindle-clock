@@ -2,23 +2,18 @@
 # Name: 大字时钟 Big Clock
 # Author: hahakalo
 #
-# v4 新增横竖屏切换（信息点完全相同）：
-#   documents/HENG 文件控制方向，拔线后 20 秒内自动生效，无需重启：
-#     无 HENG 文件   -> 竖屏（默认）
-#     HENG 内容为 1  -> 横屏·充电口在右侧观看
-#     HENG 内容为 2  -> 横屏·充电口在左侧观看
-#   横屏图片为预旋转版本：time_l/time_r、banner_l/banner_r、wx_l/wx_r
+# v6 新增「电源键双击退出」—— 修复冻结后无法退出的问题：
+#   屏幕触摸在冻结模式下不可用（这正是防覆盖机制），因此退出做成物理按键：
+#   3 秒内快速连按两下电源键 = 退出时钟（解冻、停服务、回桌面）
+#   单按电源键 = 无反应（防误触）；长按 = 硬件强制重启（不变）
+#   退出后重启不会自动运行时钟，想再用：书库点「大字时钟」
 #
-# v3 要点（保留）：
-#   - 绘制成功后冻结系统 UI（cvm/awesome），任何程序都无法再重画覆盖时钟
-#   - 三重进程保活：upstart 服务 / setsid 独立会话 / scriptlet 本体兜底
-#   - 停止：documents 里放一个名为 STOP 的文件，20 秒内自动解冻退出
-#   - 紧急恢复：长按电源键约 10 秒强制重启（硬件级，永远有效）
-#   - 重启后 upstart 自动恢复时钟
+# v5 维护窗口（保留）：
+#   - 脚本自拷贝到 /tmp 运行，不占用用户分区，USB 读写安全
+#   - 重启后前 120 秒 + 每小时整点后 60 秒系统自动解冻（维护期，插 USB 最稳）
 #
-# 布局（全图片，无文字排版）：
-#   竖屏: banner(顶) + time(中) + wx(底)
-#   横屏: banner(一侧) + time(中) + wx(对侧)，图片已在电脑端旋转好
+# v4 横竖屏（保留）：documents/HENG：无=竖屏；1=横屏(充电口右)；2=横屏(充电口左)
+# v3 要点（保留）：预渲染图片 + fbink 绘制 + 冻结防覆盖 + 三重进程保活
 
 IMG=/mnt/us/clockimg
 DOC=/mnt/us/documents
@@ -31,7 +26,7 @@ ORI=0   # 0=竖屏 1=横屏L(充电口右) 2=横屏R(充电口左)
 
 # ================= 入口（点击书库条目） =================
 if [ "$1" != "bg" ]; then
-  rm -f "$LOG" "$DOC/STOP"
+  rm -f "$LOG" "$DOC/STOP" /tmp/clock-quit
   echo "===== entry $(date) =====" >> "$LOG"
   # 解冻（清上次残留）+ 先杀旧进程（先 CONT 再 KILL，防旧进程处于停止态卡住 initctl）
   [ -f "$FROZ" ] && { for p in $(cat "$FROZ"); do kill -CONT $p 2>/dev/null; done; rm -f "$FROZ"; }
@@ -50,7 +45,7 @@ if [ "$1" != "bg" ]; then
   rm -f /mnt/us/clockimg/*.gif /mnt/us/clockfont.ttf >> "$LOG" 2>&1
   rm -f "$DOC"/clock-pro.sh "$DOC"/clock-pro.log "$DOC"/clock.html >> "$LOG" 2>&1
   rm -f "$DOC"/clock-fix*.sh "$DOC"/clock-display.sh "$DOC"/clock-setup.sh \
-        "$DOC"/busybox "$DOC"/Arial-Bold.ttf >> "$LOG" 2>&1
+        "$DOC"/busybox "$DOC"/Arial-Bold.ttf "$DOC"/clock.sh.bak >> "$LOG" 2>&1
   # 安装开机自启
   if ! (echo > /etc/.t) 2>/dev/null; then
     mount -o remount,rw / >> "$LOG" 2>&1
@@ -81,6 +76,12 @@ EOF
 fi
 
 # ================= 后台主程序 =================
+# ---- 自拷贝到 /tmp 运行：不占用 /mnt/us，USB 模式可正常卸载用户分区 ----
+case "$0" in
+  /tmp/*) ;;
+  *) cp "$0" /tmp/clock.sh 2>>"$LOG" && exec /bin/sh /tmp/clock.sh bg ;;
+esac
+
 echo "===== bg $(date) pid $$ =====" >> "$LOG"
 if [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null; then
   echo "another instance alive, exit" >> "$LOG"; exit 1
@@ -201,8 +202,42 @@ unfreeze() {
   }
 }
 
+# ---------- 电源键双击退出（冻结模式下屏幕触摸不可用，用物理按键） ----------
+# 直接读内核输入事件：EV_KEY(1) KEY_POWER(116) VALUE=1(按下)
+# 3 秒内两次按下 -> 写 STOP 文件，主循环 20 秒内执行停表
+power_watch() {
+  D=$(grep -A4 'gpio-keys' /proc/bus/input/devices 2>/dev/null | grep -o 'event[0-9][0-9]*' | head -n 1)
+  PD=/dev/input/${D:-event0}
+  [ -c "$PD" ] || { echo "watch: no power dev" >> "$LOG"; return; }
+  echo "watch: $PD" >> "$LOG"
+  if command -v timeout >/dev/null 2>&1; then TMO="timeout 3500"; else TMO=""; fi
+  LASTP=0
+  while [ ! -f /tmp/clock-quit ]; do
+    E=$($TMO dd if=$PD bs=16 count=1 2>/dev/null | od -d 2>/dev/null | tr -s ' \n' '  ')
+    if [ -z "$E" ]; then sleep 1; continue; fi
+    set -- $E
+    TY=""; CO=""; VA=""
+    case $# in
+      8) TY=$5; CO=$6; VA=$7 ;;      # 无偏移列
+      9|10) TY=$6; CO=$7; VA=$8 ;;   # 带偏移列（可能还带尾偏移）
+    esac
+    [ -n "$TY" ] || continue
+    if [ "$TY" = "1" ] && [ "$CO" = "116" ] && [ "$VA" = "1" ]; then
+      NOW=$(date +%s)
+      echo "power press $NOW" >> "$LOG"
+      if [ "$LASTP" != "0" ] && [ $((NOW - LASTP)) -le 3 ]; then
+        echo "POWER DOUBLE-PRESS -> exit" >> "$LOG"
+        touch "$DOC/STOP"
+        return
+      fi
+      LASTP=$NOW
+    fi
+  done
+}
+
 stop_clock() {
   unfreeze
+  touch /tmp/clock-quit 2>/dev/null
   rm -f "$PIDF"
   if ! (echo > /etc/.t) 2>/dev/null; then mount -o remount,rw / 2>/dev/null; fi
   rm -f /etc/.t /etc/upstart/bigclock.conf
@@ -214,16 +249,17 @@ stop_clock() {
   exit 1
 }
 
-# ---------- 启动序列：先画 -> 冻结 -> 再画一次盖掉可能的桌面闪现 ----------
+# ---------- 启动序列：电源键监视 -> 画两轮 -> 冻结交给主循环窗口逻辑 ----------
+rm -f /tmp/clock-quit
+power_watch &
 read_ori
 echo "start ori=$ORI" >> "$LOG"
 draw
 weather
 draw
-freeze
-sleep 3
-draw
 
+START=$(date +%s)
+GRACE=120
 LAST=$(date +%H%M)
 LASTORI=$ORI
 while true; do
@@ -238,6 +274,22 @@ while true; do
   [ "$HM" != "$LAST" ] && { LAST=$HM; draw; }
   N=$(date +%s)
   [ $((N - WTIME)) -ge 1800 ] && { weather; draw; }
+  # ===== 维护窗口：每小时第 00 分钟，或开机后前 120 秒 =====
+  WIN=0
+  [ "$(date +%M)" = "00" ] && WIN=1
+  [ $((N - START)) -lt $GRACE ] && WIN=1
+  if [ "$WIN" = "1" ]; then
+    if [ -f "$FROZ" ]; then
+      echo "window open $(date +%H:%M:%S)" >> "$LOG"
+      unfreeze
+    fi
+    draw
+  else
+    if [ ! -f "$FROZ" ]; then
+      echo "window closed, freezing $(date +%H:%M:%S)" >> "$LOG"
+      freeze
+    fi
+  fi
   lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
   sleep 20
 done
