@@ -22,6 +22,7 @@
 - **老人友好**：全屏大字、多行分区、纯黑白墨水屏对比度
 - **零依赖**：不依赖浏览器、不依赖局域网服务器、不依赖任何外部主机——全部在 Kindle 本机运行
 - **开机自启**：重启后时钟自动恢复，无需任何操作
+- **横竖屏切换**：USB 放置/删除 `documents/HENG` 文件即可切换横屏（两个方向）/竖屏，拔线后 20 秒内生效，信息点完全相同
 - **天气**：Open-Meteo 免费接口（无需 key），每 30 分钟更新；断网时时钟照常走
 
 ## 我的设备（实测通过）
@@ -79,18 +80,18 @@ pip install --user Pillow
 
 cd clock-setup
 python3 mkpics.py
-# 输出 ../clockimg/{time,banner,wx}/ 共约 4800 张 PNG，约 34MB
+# 输出 ../clockimg/ 共 9 个子目录（竖屏 + 横屏两方向），约 14,400 张 PNG，约 95MB
 ```
 
 ### 第 3 步：拷贝到 Kindle
 
-USB 连接 Kindle，把以下内容拷入（约 5-8 分钟）：
+USB 连接 Kindle，把以下内容拷入（约 14,400 张图片共 95MB，拷贝约 15-20 分钟）：
 
 ```
-clockimg/time/    →  Kindle 根目录 /clockimg/time/
-clockimg/banner/  →  Kindle 根目录 /clockimg/banner/
-clockimg/wx/      →  Kindle 根目录 /clockimg/wx/
-clock.sh          →  Kindle /documents/clock.sh
+clockimg/time/ time_l/ time_r/           →  Kindle 根目录 /clockimg/（时间：竖屏+横屏×2）
+clockimg/banner/ banner_l/ banner_r/     →  Kindle /clockimg/（日期星期）
+clockimg/wx/ wx_l/ wx_r/                 →  Kindle /clockimg/（天气）
+clock.sh                                 →  Kindle /documents/clock.sh
 ```
 
 弹出并拔线。
@@ -106,6 +107,7 @@ clock.sh          →  Kindle /documents/clock.sh
 | 日常使用 | 插上电源线即可。常亮是自动的：脚本每 20 秒维持一次防休眠信号 |
 | 重启后 | 无需操作，开机自启服务自动恢复时钟 |
 | 天气 | 保持 Wi-Fi 连接，每 30 分钟自动更新（Open-Meteo，免费无 key） |
+| 横屏/竖屏 | USB 连接后改 `documents/HENG` 文件：删除 = 竖屏；内容 `1` = 横屏（充电口在右）；内容 `2` = 横屏（充电口在左）。拔线后 20 秒内自动切换，无需重启 |
 | 触摸无反应 | 正常现象——时钟模式下系统 UI 已冻结（这正是屏幕不被覆盖的原因） |
 | 紧急恢复 | 长按电源键约 10 秒强制重启（硬件级，永远有效）；重启后时钟自动回来 |
 | 彻底停用 | USB 连接后在 documents 文件夹新建名为 `STOP` 的空文件，20 秒内自动解冻、清理自启、退出 |
@@ -167,6 +169,7 @@ A jailbroken old Kindle repurposed as a dedicated e-ink clock:
 - **Senior-friendly**: full-screen large text, multi-row layout, pure black & white
 - **Zero external dependencies**: no browser, no LAN server, no host computer — everything runs on the Kindle itself
 - **Auto-start on boot**: after a reboot the clock comes back by itself
+- **Portrait/landscape switch**: create/delete the `documents/HENG` file over USB — landscape (two directions) or portrait, effective within 20 s after unplugging, identical information
 - **Weather**: free Open-Meteo API (no key), refreshed every 30 min; offline the clock keeps ticking
 
 ## Tested Device
@@ -213,16 +216,16 @@ pip install --user Pillow
 # CJK glyphs use macOS system fonts; Linux users edit font paths in mkpics.py
 
 cd clock-setup
-python3 mkpics.py     # -> ../clockimg/{time,banner,wx}/ (~4,800 PNGs, ~34 MB)
+python3 mkpics.py     # -> ../clockimg/ 9 subdirs (~14,400 PNGs, ~95 MB)
 ```
 
 ### 3. Copy to Kindle
 
 ```
-clockimg/time/    ->  /clockimg/time/
-clockimg/banner/  ->  /clockimg/banner/
-clockimg/wx/      ->  /clockimg/wx/
-clock.sh          ->  /documents/clock.sh
+clockimg/time/ time_l/ time_r/           ->  /clockimg/
+clockimg/banner/ banner_l/ banner_r/     ->  /clockimg/
+clockimg/wx/ wx_l/ wx_r/                 ->  /clockimg/
+clock.sh                                 ->  /documents/clock.sh
 ```
 
 Eject and unplug.
@@ -238,6 +241,7 @@ Open the Kindle library and tap the new entry **"Big Clock"** (KPV scriptlet). T
 | Daily use | Just keep it plugged in. Always-on is automatic (anti-sleep signal every 20 s) |
 | After reboot | Nothing — the boot service restores the clock |
 | Weather | Keep Wi-Fi on; refreshed every 30 min |
+| Portrait/landscape | Edit `documents/HENG` over USB: absent = portrait; content `1` = landscape (USB port on the right); `2` = landscape (USB port on the left). Takes effect within 20 s after unplugging |
 | Touch unresponsive | Expected — the UI is frozen (that's why nothing can cover the clock) |
 | Emergency escape | Hold the power button ~10 s for a hard reboot (always works); the clock returns afterwards |
 | Stop for good | Create an empty file named `STOP` in documents/ via USB; it unfreezes, removes auto-start and exits within 20 s |

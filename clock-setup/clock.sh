@@ -2,15 +2,23 @@
 # Name: 大字时钟 Big Clock
 # Author: hahakalo
 #
-# v3 kiosk 版：解决"画完被桌面覆盖 / 后台进程被杀"
+# v4 新增横竖屏切换（信息点完全相同）：
+#   documents/HENG 文件控制方向，拔线后 20 秒内自动生效，无需重启：
+#     无 HENG 文件   -> 竖屏（默认）
+#     HENG 内容为 1  -> 横屏·充电口在右侧观看
+#     HENG 内容为 2  -> 横屏·充电口在左侧观看
+#   横屏图片为预旋转版本：time_l/time_r、banner_l/banner_r、wx_l/wx_r
+#
+# v3 要点（保留）：
 #   - 绘制成功后冻结系统 UI（cvm/awesome），任何程序都无法再重画覆盖时钟
 #   - 三重进程保活：upstart 服务 / setsid 独立会话 / scriptlet 本体兜底
-#   - 停止方法：documents 里放一个名为 STOP 的文件，20 秒内自动解冻退出
+#   - 停止：documents 里放一个名为 STOP 的文件，20 秒内自动解冻退出
 #   - 紧急恢复：长按电源键约 10 秒强制重启（硬件级，永远有效）
 #   - 重启后 upstart 自动恢复时钟
 #
 # 布局（全图片，无文字排版）：
-#   顶部 banner/{MMDD}-{W}.png 日期+星期 / 中部 time/HHMM.png / 底部 wx/T{t}D{d}.png
+#   竖屏: banner(顶) + time(中) + wx(底)
+#   横屏: banner(一侧) + time(中) + wx(对侧)，图片已在电脑端旋转好
 
 IMG=/mnt/us/clockimg
 DOC=/mnt/us/documents
@@ -19,10 +27,11 @@ EIPS=/usr/sbin/eips
 LOG=$DOC/clock.log
 PIDF=/tmp/bigclock.pid
 FROZ=/tmp/clock-frozen.pids
+ORI=0   # 0=竖屏 1=横屏L(充电口右) 2=横屏R(充电口左)
 
 # ================= 入口（点击书库条目） =================
 if [ "$1" != "bg" ]; then
-  rm -f "$LOG"
+  rm -f "$LOG" "$DOC/STOP"
   echo "===== entry $(date) =====" >> "$LOG"
   # 解冻（清上次残留）+ 先杀旧进程（先 CONT 再 KILL，防旧进程处于停止态卡住 initctl）
   [ -f "$FROZ" ] && { for p in $(cat "$FROZ"); do kill -CONT $p 2>/dev/null; done; rm -f "$FROZ"; }
@@ -37,16 +46,11 @@ if [ "$1" != "bg" ]; then
         /etc/upstart/clock-alwayson.conf /etc/upstart/clock-httpd.conf \
         /etc/upstart/clock-web8000.conf >> "$LOG" 2>&1
   /sbin/initctl reload-configuration >> "$LOG" 2>&1
-  # 清旧文件 + banner 目录迁移
+  # 清旧实验文件
   rm -f /mnt/us/clockimg/*.gif /mnt/us/clockfont.ttf >> "$LOG" 2>&1
   rm -f "$DOC"/clock-pro.sh "$DOC"/clock-pro.log "$DOC"/clock.html >> "$LOG" 2>&1
   rm -f "$DOC"/clock-fix*.sh "$DOC"/clock-display.sh "$DOC"/clock-setup.sh \
         "$DOC"/busybox "$DOC"/Arial-Bold.ttf >> "$LOG" 2>&1
-  if [ -d $IMG/banner2 ]; then
-    rm -rf $IMG/banner
-    mv $IMG/banner2 $IMG/banner
-    echo "banner migrated: $(ls $IMG/banner 2>/dev/null | wc -l)" >> "$LOG"
-  fi
   # 安装开机自启
   if ! (echo > /etc/.t) 2>/dev/null; then
     mount -o remount,rw / >> "$LOG" 2>&1
@@ -102,6 +106,18 @@ if [ "$MODE" = "2" ]; then
 fi
 echo "MODE=$MODE" >> "$LOG"
 
+# ---------- 读取横竖屏设置（HENG 文件，USB 可改） ----------
+read_ori() {
+  ORI=0
+  if [ -f "$DOC/HENG" ]; then
+    ORI=1
+    read V < "$DOC/HENG" 2>/dev/null
+    case "$V" in
+      2*|r*|R*) ORI=2 ;;
+    esac
+  fi
+}
+
 WXIMG=""; WXLINE=""; WTIME=0
 
 weather() {
@@ -142,9 +158,19 @@ draw() {
     M=$(date +%m); D=$(date +%d)
     W=$(date +%u 2>/dev/null)
     [ -n "$W" ] || W=$(( ($(date +%w) + 6) % 7 + 1 ))
-    "$FBINK" -g file=$IMG/time/$HM.png,halign=CENTER,valign=MIDDLE -b >>"$LOG" 2>&1
-    "$FBINK" -g file=$IMG/banner/$M$D-$W.png,halign=CENTER,valign=TOP -b >>"$LOG" 2>&1
-    [ -n "$WXIMG" ] && "$FBINK" -g file=$IMG/wx/$WXIMG,halign=CENTER,valign=BOTTOM -b >>"$LOG" 2>&1
+    if [ "$ORI" = "1" ]; then
+      "$FBINK" -g file=$IMG/time_l/$HM.png,halign=CENTER,valign=MIDDLE -b >>"$LOG" 2>&1
+      "$FBINK" -g file=$IMG/banner_l/$M$D-$W.png,halign=RIGHT,valign=TOP -b >>"$LOG" 2>&1
+      [ -n "$WXIMG" ] && "$FBINK" -g file=$IMG/wx_l/$WXIMG,halign=LEFT,valign=TOP -b >>"$LOG" 2>&1
+    elif [ "$ORI" = "2" ]; then
+      "$FBINK" -g file=$IMG/time_r/$HM.png,halign=CENTER,valign=MIDDLE -b >>"$LOG" 2>&1
+      "$FBINK" -g file=$IMG/banner_r/$M$D-$W.png,halign=LEFT,valign=TOP -b >>"$LOG" 2>&1
+      [ -n "$WXIMG" ] && "$FBINK" -g file=$IMG/wx_r/$WXIMG,halign=RIGHT,valign=TOP -b >>"$LOG" 2>&1
+    else
+      "$FBINK" -g file=$IMG/time/$HM.png,halign=CENTER,valign=MIDDLE -b >>"$LOG" 2>&1
+      "$FBINK" -g file=$IMG/banner/$M$D-$W.png,halign=CENTER,valign=TOP -b >>"$LOG" 2>&1
+      [ -n "$WXIMG" ] && "$FBINK" -g file=$IMG/wx/$WXIMG,halign=CENTER,valign=BOTTOM -b >>"$LOG" 2>&1
+    fi
     "$FBINK" -s top=0,left=0,width=600,height=800 -W GC16 >>"$LOG" 2>&1
   elif [ "$MODE" = "2" ]; then
     $EIPS -g $IMG/time/$HM.png >>"$LOG" 2>&1
@@ -189,6 +215,8 @@ stop_clock() {
 }
 
 # ---------- 启动序列：先画 -> 冻结 -> 再画一次盖掉可能的桌面闪现 ----------
+read_ori
+echo "start ori=$ORI" >> "$LOG"
 draw
 weather
 draw
@@ -197,8 +225,15 @@ sleep 3
 draw
 
 LAST=$(date +%H%M)
+LASTORI=$ORI
 while true; do
   [ -f $DOC/STOP ] && stop_clock
+  read_ori
+  if [ "$ORI" != "$LASTORI" ]; then
+    LASTORI=$ORI
+    echo "orientation -> $ORI" >> "$LOG"
+    draw
+  fi
   HM=$(date +%H%M)
   [ "$HM" != "$LAST" ] && { LAST=$HM; draw; }
   N=$(date +%s)
